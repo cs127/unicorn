@@ -1,0 +1,924 @@
+/* I wish I could use BCPL-style comments. damn you C89.. */
+
+
+#include "unicorn.h"
+
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#if __STDC_VERSION__ >= 199901L
+#include <stdbool.h>
+#else
+typedef int bool;
+#define false 0
+#define true  1
+#endif
+
+
+#define UC_INVALID_SIZE ((size_t)(-1))
+
+#define UC_MAX_CODEPOINT 0x10FFFF
+
+#define UC_MAX_1BYTE 0x007F
+#define UC_MAX_2BYTE 0x07FF
+#define UC_MAX_3BYTE 0xFFFF
+#define UC_MAX_4BYTE UC_MAX_CODEPOINT
+
+#define UC_SURMASK 0x03FF
+#define UC_HIGHSUR 0xD800
+#define UC_LOWSUR  0xDC00
+
+#define UC_IS_IN_RANGE(c) ((c) >= 0 && (c) <= UC_MAX_CODEPOINT)
+
+#define UC_SUR_OFFSET 0x10000
+#define UC_IS_BMP(c) ((c) <= 0xFFFF)
+
+#define UC_IS_HIGHSUR(c) ((c) >= 0xD800 && (c) < 0xDC00)
+#define UC_IS_LOWSUR(c)  ((c) >= 0xDC00 && (c) < 0xE000)
+
+#define UC_IS_SUR(c) (UC_IS_HIGHSUR(c) || UC_IS_LOWSUR(c))
+
+#define UC_TOP1 0x80
+#define UC_TOP2 0xC0
+#define UC_TOP3 0xE0
+#define UC_TOP4 0xF0
+#define UC_TOP5 0xF8
+
+#define UC_BOTTOM3 0x07
+#define UC_BOTTOM4 0x0F
+#define UC_BOTTOM5 0x1F
+#define UC_BOTTOM6 0x3F
+
+#define UC_IS_1BYTE(c) (!((c) & UC_TOP1))
+#define UC_IS_2BYTE(c) (((c) & UC_TOP3) == UC_TOP2)
+#define UC_IS_3BYTE(c) (((c) & UC_TOP4) == UC_TOP3)
+#define UC_IS_4BYTE(c) (((c) & UC_TOP5) == UC_TOP4)
+
+#define UC_IS_CONT(c)  (((c) & UC_TOP2) == UC_TOP1)
+
+
+size_t UC_wcslen(const wchar_t* s)
+{
+	size_t i;
+
+	i = 0;
+
+	while (s[i]) i++;
+
+	return i;
+}
+
+size_t UC_wcsnlen(const wchar_t* s, size_t n)
+{
+	size_t i;
+
+	i = 0;
+
+	while (s[i] && i < n) i++;
+
+	return i;
+}
+
+wchar_t* UC_wcscpy(wchar_t* dest, const wchar_t* src)
+{
+	size_t i;
+
+	for (i = 0; src[i]; i++) dest[i] = src[i];
+	dest[i] = L'\0';
+
+	return dest;
+}
+
+wchar_t* UC_wcsncpy(wchar_t* dest, const wchar_t* src, size_t n)
+{
+	size_t i;
+	bool end;
+
+	end = false;
+
+	for (i = 0; i < n; i++)
+	{
+		dest[i] = !end ? src[i] : L'\0';
+		if (!dest[i]) end = true;
+	}
+
+	return dest;
+}
+
+wchar_t* UC_wcpcpy(wchar_t* dest, const wchar_t* src)
+{
+	size_t i;
+
+	for (i = 0; src[i]; i++) dest[i] = src[i];
+	dest[i] = L'\0';
+
+	return &dest[i];
+}
+
+wchar_t* UC_wcpncpy(wchar_t* dest, const wchar_t* src, size_t n)
+{
+	size_t i,
+	       endpos;
+	bool end;
+
+	end = false;
+	endpos = n;
+
+	for (i = 0; i < n; i++)
+	{
+		dest[i] = !end ? src[i] : L'\0';
+		if (!dest[i])
+		{
+			end = true;
+			endpos = i + 1;
+		}
+	}
+
+	return &dest[endpos];
+}
+
+wchar_t* UC_wcscat(wchar_t* dest, const wchar_t* src)
+{
+	size_t i,
+	       tail;
+
+	tail = 0;
+
+	while (dest[tail]) tail++;
+
+	for (i = 0; src[i]; i++) dest[tail + i] = src[i];
+	dest[tail + i] = L'\0';
+
+	return dest;
+}
+
+wchar_t* UC_wcsncat(wchar_t* dest, const wchar_t* src, size_t n)
+{
+	size_t i,
+	       tail;
+
+	tail = 0;
+
+	while (dest[tail]) tail++;
+
+	for (i = 0; src[i] && i < n; i++) dest[tail + i] = src[i];
+	dest[tail + i] = L'\0';
+
+	return dest;
+}
+
+int UC_wcscmp(const wchar_t* s1, const wchar_t* s2)
+{
+	size_t i;
+
+	for (i = 0; s1[i] || s2[i]; i++)
+	{
+		if (s1[i] != s2[i]) return (int)(s1[i]) - (int)(s2[i]);
+	}
+
+	return 0;
+}
+
+int UC_wcsncmp(const wchar_t* s1, const wchar_t* s2, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n && (s1[i] || s2[i]); i++)
+	{
+		if (s1[i] != s2[i]) return (int)(s1[i]) - (int)(s2[i]);
+	}
+
+	return 0;
+}
+
+wchar_t* UC_wcschr(const wchar_t* s, wchar_t c)
+{
+	size_t i;
+	wchar_t* st;
+
+	st = (wchar_t*)s;
+
+	for (i = 0; s[i]; i++)
+	{
+		if (s[i] == c) return &st[i];
+	}
+
+	return NULL;
+}
+
+wchar_t* UC_wcsrchr(const wchar_t* s, wchar_t c)
+{
+	size_t i,
+	       last;
+	wchar_t* st;
+	
+	st = (wchar_t*)s;
+	last = UC_INVALID_SIZE;
+
+	for (i = 0; s[i]; i++)
+	{
+		if (s[i] == c) last = i;
+	}
+
+	return (last != UC_INVALID_SIZE) ? &st[last] : NULL;
+}
+
+wchar_t* UC_wcsstr(const wchar_t* s, const wchar_t* kernel)
+{
+	/* could probably use some optimization */
+
+	size_t i,
+	       klen;
+	wchar_t* st;
+
+	st = (wchar_t*)s;
+
+	if (!*kernel) return st;
+
+	klen = UC_wcslen(kernel);
+
+	for (i = 0; s[i] && s[i + klen - 1]; i++)
+	{
+		if (!UC_wcsncmp(&s[i], kernel, klen)) return &st[i];
+	}
+
+	return NULL;
+}
+
+size_t UC_wcsspn(const wchar_t* s, const wchar_t* accept)
+{
+	size_t i;
+
+	for (i = 0; s[i]; i++)
+	{
+		if (!UC_wcschr(accept, s[i])) return i;
+	}
+
+	return i;
+}
+
+size_t UC_wcscspn(const wchar_t* s, const wchar_t* reject)
+{
+	size_t i;
+
+	for (i = 0; s[i]; i++)
+	{
+		if (UC_wcschr(reject, s[i])) return i;
+	}
+
+	return i;
+}
+
+wchar_t* UC_wcspbrk(const wchar_t* s, const wchar_t* accept)
+{
+	size_t i;
+	wchar_t* st;
+
+	st = (wchar_t*)s;
+
+	for (i = 0; s[i]; i++)
+	{
+		if (UC_wcschr(accept, s[i])) return &st[i];
+	}
+
+	return NULL;
+}
+
+/*
+wchar_t* UC_wcstok(wchar_t* s, const wchar_t* delim, wchar_t** p)
+{
+}
+*/
+
+wchar_t* UC_wmemset(wchar_t* s, wchar_t c, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++) s[i] = c;
+
+	return s;
+}
+
+wchar_t* UC_wmemcpy(wchar_t* dest, const wchar_t* src, size_t n)
+{
+	return memcpy(dest, src, n * sizeof(wchar_t));
+}
+
+wchar_t* UC_wmemmove(wchar_t* dest, const wchar_t* src, size_t n)
+{
+	return memmove(dest, src, n * sizeof(wchar_t));
+}
+
+int UC_wmemcmp(const wchar_t* s1, const wchar_t* s2, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++)
+	{
+		if (s1[i] != s2[i]) return (int)(s1[i]) - (int)(s2[i]);
+	}
+
+	return 0;
+}
+
+wchar_t* UC_wmemchr(const wchar_t* s, wchar_t c, size_t n)
+{
+	size_t i;
+	wchar_t* st;
+
+	st = (wchar_t*)s;
+
+	for (i = 0; i < n; i++)
+	{
+		if (s[i] == c) return &st[i];
+	}
+
+	return NULL;
+}
+
+size_t UC_wcstombs(char* dest, const wchar_t* src, size_t n)
+{
+	size_t isrc,
+	       idest,
+	       trail;
+	unsigned long int csrc;
+	
+	isrc = 0;
+	trail = 0;
+
+	for (idest = 0; idest < n || !dest; idest++)
+	{
+		if (!trail)
+		{
+			/* start of a character. */
+
+			if (!UC_IS_IN_RANGE(src[isrc]))
+			{
+				/* codepoint out of valid range. */
+				return -1;
+			}
+#if UC_UTF16 /* UTF-16 */
+			if (!UC_IS_SUR(src[isrc]))
+			{
+				/* regular character. */
+				csrc = src[isrc++];
+			}
+			else if
+			(
+				UC_IS_HIGHSUR(src[isrc]) &&
+				UC_IS_LOWSUR(src[isrc + 1])
+			)
+			{
+				/* surrogate pair. */
+				csrc = 0;
+				csrc |= (src[isrc++] & UC_SURMASK) << 10;
+				csrc |= (src[isrc++] & UC_SURMASK) << 0;
+				csrc += UC_SUR_OFFSET;
+			}
+			else
+			{
+				/* invalid surrogate sequence. */
+				return -1;
+			}
+#else        /* UTF-32 */
+			if (!UC_IS_SUR(src[isrc]))
+			{
+				csrc = src[isrc++];
+			}
+			else
+			{
+				/* UTF-16 surrogate (invalid in UTF-32). */
+				return -1;
+			}
+#endif
+			if (!csrc)
+			{
+				/* null character (end of string). */
+				if (dest) dest[idest] = '\0';
+				return idest;
+			}
+			else if (csrc <= UC_MAX_1BYTE)
+			{
+				/* 1-byte (ASCII) character. */
+				trail = 0;
+				if (dest) dest[idest] = csrc;
+			}
+			else if (csrc <= UC_MAX_2BYTE)
+			{
+				/* first byte of a 2-byte character. */
+				trail = 1;
+				if (dest && idest + trail >= n) return idest;
+				if (dest) dest[idest] = (csrc >> 6) | UC_TOP2;
+			}
+			else if (csrc <= UC_MAX_3BYTE)
+			{
+				/* first byte of a 3-byte character. */
+				trail = 2;
+				if (dest && idest + trail >= n) return idest;
+				if (dest) dest[idest] = (csrc >> 12) | UC_TOP3;
+			}
+			else
+			{
+				/* first byte of a 4-byte (non-BMP) character.
+				   in UTF-16, this case will only occur with
+				   surrogate pairs.                           */
+				trail = 3;
+				if (dest && idest + trail >= n) return idest;
+				if (dest) dest[idest] = (csrc >> 18) | UC_TOP4;
+			}
+		}
+		else
+		{
+			/* continuation of a 2/3/4-byte character. */
+			trail--;
+			if (dest) dest[idest] =
+			((csrc >> (6 * trail)) & UC_BOTTOM6) | UC_TOP1;
+		}
+	}
+
+	return idest;
+}
+
+size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
+{
+	size_t isrc,
+	       idest,
+	       trail;
+	bool lowsur;
+	unsigned long int csrc;
+
+	isrc = 0;
+	lowsur = false; /* always false in UTF-32. */
+
+	for (idest = 0; idest < n || !dest; idest++)
+	{
+		if (!lowsur)
+		{
+			/* regular character or high surrogate.
+			   surrogates are only valid in UTF-16. */
+
+			/* read the first byte of the character. */
+
+			if (UC_IS_1BYTE(src[isrc]))
+			{
+				/* 1-byte (ASCII) character. */
+				trail = 0;
+				csrc = src[isrc++];
+			}
+			else if (UC_IS_2BYTE(src[isrc]))
+			{
+				/* first byte of a 2-byte character. */
+				trail = 1;
+				csrc = (src[isrc++] & UC_BOTTOM5) << 6;
+			}
+			else if (UC_IS_3BYTE(src[isrc]))
+			{
+				/* first byte of a 3-byte character.
+				   this might be a UTF-16 surrogate,
+				   which is invalid in UTF-8.        */
+				trail = 2;
+				csrc = (src[isrc++] & UC_BOTTOM4) << 12;
+			}
+			else if (UC_IS_4BYTE(src[isrc]))
+			{
+				/* first byte of a 4-byte (non-BMP) character.
+				   this will require checking later:
+				   if the codepoint is 0x10FFFF or lower,
+				   it requires a surrogate pair in UTF-16.
+				   otherwise, it is invalid entirely.         */
+				trail = 3;
+				csrc = (src[isrc++] & UC_BOTTOM3) << 18;
+			}
+			else
+			{
+				/* unexpected byte, which is either:
+				   * continuation byte
+				     (cannot be at the start of a character),
+				   or
+				   * first byte of a 5/6/7/8-byte character
+				     (nonstandard).                           */
+				return -1;
+			}
+
+			/* read the remaining bytes. */
+
+			while (trail)
+			{
+				if (!UC_IS_CONT(src[isrc]))
+				{
+					/* unexpected byte
+					   (expected a continuation byte). */
+					return -1;
+				}
+
+				csrc |=
+				(src[isrc++] & UC_BOTTOM6) << (6 * (--trail));
+			}
+
+			if (UC_IS_SUR(csrc))
+			{
+				/* UTF-16 surrogate (invalid in UTF-8). */
+				return -1;
+			}
+			else if (!UC_IS_IN_RANGE(csrc))
+			{
+				/* codepoint out of valid range. */
+				return -1;
+			}
+
+			if (!csrc)
+			{
+				/* null character (end of string). */
+				if (dest) dest[idest] = L'\0';
+				return idest;
+			}
+#if UC_UTF16 /* UTF-16 */
+			if (UC_IS_BMP(csrc))
+			{
+				/* BMP character.
+				   can be written normally. */
+				if (dest) dest[idest] = csrc;
+			}
+			else
+			{
+				/* non-BMP character.
+				   requires a surrogate pair. */
+
+				/* write the high surrogate now. */
+				if (dest) dest[idest] =
+				((csrc - UC_SUR_OFFSET) >> 10) | UC_HIGHSUR;
+
+				/* write the low surrogate on the next turn. */
+				lowsur = true;
+			}
+#else        /* UTF-32 */
+			if (dest) dest[idest] = csrc;
+#endif
+		}
+		else
+		{
+			/* this block of code can only be accessed in UTF-16. */
+
+			/* low surrogate. */
+			if (dest) dest[idest] =
+			((csrc - UC_SUR_OFFSET) & UC_SURMASK) | UC_LOWSUR;
+
+			/* reset the behaviour for the next turn. */
+			lowsur = false;
+		}
+	}
+
+	return idest;
+}
+
+static int UC_wctomb_internal(char* s, unsigned long int c)
+{
+	size_t i,
+	       trail;
+
+	i = 0;
+
+	if (c <= UC_MAX_1BYTE)
+	{
+		/* 1-byte (ASCII) character. */
+		trail = 0;
+		s[i++] = c;
+	}
+	else if (c <= UC_MAX_2BYTE)
+	{
+		/* first byte of a 2-byte character. */
+		trail = 1;
+		s[i++] = (c >> 6) | UC_TOP2;
+	}
+	else if (c <= UC_MAX_3BYTE)
+	{
+		/* first byte of a 3-byte character. */
+		trail = 2;
+		s[i++] = (c >> 12) | UC_TOP3;
+	}
+	else
+	{
+		/* first byte of a 4-byte (non-BMP) character.
+		   this block of code is only accessible in UTF-32,
+		   since a non-BMP character cannot be represented
+		   by a single wchar_t in UTF-16.                   */
+		trail = 3;
+		s[i++] = (c >> 18) | UC_TOP4;
+	}
+
+	while (trail)
+	{
+		s[i++] = ((c >> (6 * (--trail))) & UC_BOTTOM6) | UC_TOP1;
+	}
+
+	return i;
+}
+
+int UC_wctomb(char* s, wchar_t c)
+{
+	if (!s)
+	{
+		/* shift state reset has been requested.
+		   no further action is needed other than returning 0,
+		   because UTF-8 is stateless.                         */
+		return 0;
+	}
+
+	if (!UC_IS_IN_RANGE(c))
+	{
+		/* codepoint out of valid range. */
+		return -1;
+	}
+	if (UC_IS_SUR(c))
+	{
+		/* UTF-16 surrogate
+		   (meaningless as a single character, even in UTF-16). */
+		return -1;
+	}
+
+	return UC_wctomb_internal(s, c);
+}
+
+int UC_wcstomb(char* s, const wchar_t* pc)
+{
+	unsigned long int c;
+
+	if (!s)
+	{
+		/* shift state reset has been requested.
+		   no further action is needed other than returning 0,
+		   because UTF-8 is stateless.                         */
+		return 0;
+	}
+
+	if (!UC_IS_IN_RANGE(*pc))
+	{
+		/* codepoint out of valid range. */
+		return -1;
+	}
+#if UC_UTF16 /* UTF-16 */
+	if (!UC_IS_SUR(*pc))
+	{
+		/* regular character. */
+		c = *pc;
+	}
+	else if (UC_IS_HIGHSUR(pc[0]) && UC_IS_LOWSUR(pc[1]))
+	{
+		/* surrogate pair. */
+		c = 0;
+		c |= (pc[0] & UC_SURMASK) << 10;
+		c |= (pc[1] & UC_SURMASK) << 0;
+		c += UC_SUR_OFFSET;
+	}
+	else
+	{
+		/* invalid surrogate sequence. */
+		return -1;
+	}
+#else        /* UTF-32 */
+	if (!UC_IS_SUR(*pc))
+	{
+		c = *pc;
+	}
+	else
+	{
+		/* UTF-16 surrogate (invalid in UTF-32). */
+		return -1;
+	}
+#endif
+
+	return UC_wctomb_internal(s, c);
+}
+
+int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
+{
+	size_t i,
+	       trail;
+	unsigned long int c;
+
+	if (!s)
+	{
+		/* shift state reset has been requested.
+		   no further action is needed other than returning 0,
+		   because UTF-8 is stateless.                         */
+		return 0;
+	}
+
+	trail = UC_INVALID_SIZE;
+
+	for (i = 0; i < n || !trail; i++)
+	{
+		if (trail == UC_INVALID_SIZE)
+		{
+			/* read the first byte of the character. */
+
+			if (!s[i])
+			{
+				/* null character. */
+				return 0;
+			}
+			else if (UC_IS_1BYTE(s[i]))
+			{
+				/* 1-byte (ASCII) character. */
+				trail = 0;
+				c = s[i];
+			}
+			else if (UC_IS_2BYTE(s[i]))
+			{
+				/* first byte of a 2-byte character. */
+				trail = 1;
+				c = (s[i] & UC_BOTTOM5) << 6;
+			}
+			else if (UC_IS_3BYTE(s[i]))
+			{
+				/* first byte of a 3-byte character.
+				   this might be a UTF-16 surrogate,
+				   which is invalid in UTF-8.        */
+				trail = 2;
+				c = (s[i] & UC_BOTTOM4) << 12;
+			}
+			else if (UC_IS_4BYTE(s[i]))
+			{
+				/* first byte of a 4-byte (non-BMP) character.
+				   this will require checking later:
+				   if the codepoint is 0x10FFFF or lower,
+				   it requires a surrogate pair in UTF-16.
+				   otherwise, it is invalid entirely.         */
+				trail = 3;
+				c = (s[i] & UC_BOTTOM3) << 18;
+			}
+			else
+			{
+				/* unexpected byte, which is either:
+				   * continuation byte
+				     (cannot be at the start of a character),
+				   or
+				   * first byte of a 5/6/7/8-byte character
+				     (nonstandard).                           */
+				return -1;
+			}
+		}
+		else if (!trail)
+		{
+			/* the character has been fully parsed. */
+
+			if (UC_IS_SUR(c))
+			{
+				/* UTF-16 surrogate (invalid in UTF-8). */
+				return -1;
+			}
+			else if (!UC_IS_IN_RANGE(c))
+			{
+				/* codepoint out of valid range. */
+				return -1;
+			}
+#if UC_UTF16 /* UTF-16 */
+			if (UC_IS_BMP(c))
+			{
+				/* BMP character.
+				   can be written normally. */
+				if (pc) *pc = c;
+			}
+			else
+			{
+				/* non-BMP character.
+				   requires a surrogate pair. */
+				if (pc)
+				{
+					pc[0] =
+					((c - UC_SUR_OFFSET) >> 10) |
+					UC_HIGHSUR;
+
+					pc[1] =
+					((c - UC_SUR_OFFSET) & UC_SURMASK) |
+					UC_LOWSUR;
+				}
+			}
+#else        /* UTF-32 */
+			if (pc) *pc = c;
+#endif
+			break;
+		}
+		else
+		{
+			/* parsing the continuation of a character. */
+
+			if (!UC_IS_CONT(s[i]))
+			{
+				/* unexpected byte
+				   (expected a continuation byte). */
+				return -1;
+			}
+
+			c |= (s[i] & UC_BOTTOM6) << (6 * (--trail));
+		}
+	}
+
+	return !trail ? i : -1;
+}
+
+int UC_wctob(UC_wint_t c)
+{
+	return c >= 0x00 & c <= 0x7F ? c : EOF;
+}
+
+UC_wint_t UC_btowc(int c)
+{
+	return c >= 0x00 & c <= 0x7F ? c : UC_WEOF;
+}
+
+int UC_mblen(const char* s, size_t n)
+{
+	size_t i,
+	       trail;
+	unsigned long int c;
+
+	trail = UC_INVALID_SIZE;
+
+	for (i = 0; i < n || !trail; i++)
+	{
+		if (trail == UC_INVALID_SIZE)
+		{
+			/* read the first byte of the character. */
+
+			if (!s[i])
+			{
+				/* null character. */
+				return 0;
+			}
+			else if (UC_IS_1BYTE(s[i]))
+			{
+				/* 1-byte (ASCII) character. */
+				trail = 0;
+				c = s[i];
+			}
+			else if (UC_IS_2BYTE(s[i]))
+			{
+				/* first byte of a 2-byte character. */
+				trail = 1;
+				c = (s[i] & UC_BOTTOM5) << 6;
+			}
+			else if (UC_IS_3BYTE(s[i]))
+			{
+				/* first byte of a 3-byte character.
+				   this might be a UTF-16 surrogate,
+				   which is invalid in UTF-8.        */
+				trail = 2;
+				c = (s[i] & UC_BOTTOM4) << 12;
+			}
+			else if (UC_IS_4BYTE(s[i]))
+			{
+				/* first byte of a 4-byte (non-BMP) character.
+				   this will require checking later:
+				   if the codepoint is 0x10FFFF or lower,
+				   it requires a surrogate pair in UTF-16.
+				   otherwise, it is invalid entirely.         */
+				trail = 3;
+				c = (s[i] & UC_BOTTOM3) << 18;
+			}
+			else
+			{
+				/* unexpected byte, which is either:
+				   * continuation byte
+				     (cannot be at the start of a character),
+				   or
+				   * first byte of a 5/6/7/8-byte character
+				     (nonstandard).                           */
+				return -1;
+			}
+		}
+		else if (!trail)
+		{
+			/* the character has been fully parsed. */
+
+			if (UC_IS_SUR(c))
+			{
+				/* UTF-16 surrogate (invalid in UTF-8). */
+				return -1;
+			}
+			else if (!UC_IS_IN_RANGE(c))
+			{
+				/* codepoint out of valid range. */
+				return -1;
+			}
+
+			break;
+		}
+		else
+		{
+			/* parsing the continuation of a character. */
+
+			if (!UC_IS_CONT(s[i]))
+			{
+				/* unexpected byte
+				   (expected a continuation byte). */
+				return -1;
+			}
+
+			c |= (s[i] & UC_BOTTOM6) << (6 * (--trail));
+		}
+	}
+
+	return !trail ? i : -1;
+}
