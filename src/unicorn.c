@@ -1,3 +1,9 @@
+/*
+ * unicorn
+ * version 0.001
+ * 2024-06-09
+ */
+
 /* I wish I could use BCPL-style comments. damn you C89.. */
 
 
@@ -39,6 +45,11 @@ typedef int bool;
 
 #define UC_IS_SUR(c) (UC_IS_HIGHSUR(c) || UC_IS_LOWSUR(c))
 
+#define UC_IS_OVERLONG(c, l)        \
+((l) > 1 && (c) <= UC_MAX_1BYTE) || \
+((l) > 2 && (c) <= UC_MAX_2BYTE) || \
+((l) > 3 && (c) <= UC_MAX_3BYTE)
+
 #define UC_TOP1 0x80
 #define UC_TOP2 0xC0
 #define UC_TOP3 0xE0
@@ -50,12 +61,12 @@ typedef int bool;
 #define UC_BOTTOM5 0x1F
 #define UC_BOTTOM6 0x3F
 
-#define UC_IS_1BYTE(c) (!((c) & UC_TOP1))
-#define UC_IS_2BYTE(c) (((c) & UC_TOP3) == UC_TOP2)
-#define UC_IS_3BYTE(c) (((c) & UC_TOP4) == UC_TOP3)
-#define UC_IS_4BYTE(c) (((c) & UC_TOP5) == UC_TOP4)
+#define UC_IS_1BYTE(b) (!((b) & UC_TOP1))
+#define UC_IS_2BYTE(b) (((b) & UC_TOP3) == UC_TOP2)
+#define UC_IS_3BYTE(b) (((b) & UC_TOP4) == UC_TOP3)
+#define UC_IS_4BYTE(b) (((b) & UC_TOP5) == UC_TOP4)
 
-#define UC_IS_CONT(c)  (((c) & UC_TOP2) == UC_TOP1)
+#define UC_IS_CONT(b)  (((b) & UC_TOP2) == UC_TOP1)
 
 
 size_t UC_wcslen(const wchar_t* s)
@@ -444,7 +455,8 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 {
 	size_t isrc,
 	       idest,
-	       trail;
+	       trail,
+	       clen;
 	bool lowsur;
 	unsigned long int csrc;
 
@@ -501,6 +513,8 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 				return -1;
 			}
 
+			clen = 1 + trail;
+
 			/* read the remaining bytes. */
 
 			while (trail)
@@ -514,6 +528,13 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 
 				csrc |=
 				(src[isrc++] & UC_BOTTOM6) << (6 * (--trail));
+			}
+
+			if (UC_IS_OVERLONG(csrc, clen))
+			{
+				/* overlong character
+				   (encoded in more bytes than necessary). */
+				return -1;
 			}
 
 			if (UC_IS_SUR(csrc))
@@ -694,7 +715,8 @@ int UC_wcstomb(char* s, const wchar_t* pc)
 int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
 {
 	size_t i,
-	       trail;
+	       trail,
+	       clen;
 	unsigned long int c;
 
 	if (!s)
@@ -758,10 +780,19 @@ int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
 				     (nonstandard).                           */
 				return -1;
 			}
+
+			clen = 1 + trail;
 		}
 		else if (!trail)
 		{
 			/* the character has been fully parsed. */
+
+			if (UC_IS_OVERLONG(c, clen))
+			{
+				/* overlong character
+				   (encoded in more bytes than necessary). */
+				return -1;
+			}
 
 			if (UC_IS_SUR(c))
 			{
@@ -831,7 +862,8 @@ UC_wint_t UC_btowc(int c)
 int UC_mblen(const char* s, size_t n)
 {
 	size_t i,
-	       trail;
+	       trail,
+	       clen;
 	unsigned long int c;
 
 	trail = UC_INVALID_SIZE;
@@ -887,10 +919,19 @@ int UC_mblen(const char* s, size_t n)
 				     (nonstandard).                           */
 				return -1;
 			}
+
+			clen = 1 + trail;
 		}
 		else if (!trail)
 		{
 			/* the character has been fully parsed. */
+
+			if (UC_IS_OVERLONG(c, clen))
+			{
+				/* overlong character 
+				   (encoded in more bytes than necessary). */
+				return -1;
+			}
 
 			if (UC_IS_SUR(c))
 			{

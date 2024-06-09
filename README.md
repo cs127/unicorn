@@ -15,10 +15,7 @@ unlike the standard functions which are locale-dependent, unicorn does not suppo
 * multibyte strings (used in `mbstowcs` and the like) are assumed to be encoded in UTF-8.
   * surrogates (`U+D800`-`U+DFFF`) are considered invalid in multibyte strings.
   * characters of length 5-8 are considered invalid, and so are 4-byte characters that exceed `U+10FFFF`.
-
-> [!WARNING]
-> do not put overlong characters (characters encoded in a larger number of bytes than needed) in your multibyte strings!
-> currently, unicorn does not consider them invalid, but **this will change**.
+  * overlong characters (characters encoded in a larger number of bytes than necessary) are considered invalid.
 
 everything that unicorn implements uses the same name as its counterpart in standard C, except with a `UC_` prefix.
 the only exception being the `wchar_t` type. unicorn uses the standard `wchar_t`.
