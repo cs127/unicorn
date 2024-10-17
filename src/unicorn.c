@@ -1,7 +1,7 @@
 /*
  * unicorn
- * version 0.001
- * 2024-06-09
+ * version 0.002
+ * 2024-06-11
  */
 
 /* I wish I could use BCPL-style comments. damn you C89.. */
@@ -13,16 +13,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#if __STDC_VERSION__ >= 199901L
-#include <stdbool.h>
-#else
-typedef int bool;
-#define false 0
-#define true  1
-#endif
+
+typedef enum {UC_false, UC_true} UC_bool;
 
 
-#define UC_INVALID_SIZE ((size_t)(-1))
+#define UC_SIZE_PLACEHOLDER ((size_t)(-1))
 
 #define UC_MAX_CODEPOINT 0x10FFFF
 
@@ -71,9 +66,7 @@ typedef int bool;
 
 size_t UC_wcslen(const wchar_t* s)
 {
-	size_t i;
-
-	i = 0;
+	size_t i = 0;
 
 	while (s[i]) i++;
 
@@ -82,9 +75,7 @@ size_t UC_wcslen(const wchar_t* s)
 
 size_t UC_wcsnlen(const wchar_t* s, size_t n)
 {
-	size_t i;
-
-	i = 0;
+	size_t i = 0;
 
 	while (s[i] && i < n) i++;
 
@@ -96,6 +87,8 @@ wchar_t* UC_wcscpy(wchar_t* dest, const wchar_t* src)
 	size_t i;
 
 	for (i = 0; src[i]; i++) dest[i] = src[i];
+
+	/* wcscpy/wcpcpy must null-terminate the destination. */
 	dest[i] = L'\0';
 
 	return dest;
@@ -104,24 +97,50 @@ wchar_t* UC_wcscpy(wchar_t* dest, const wchar_t* src)
 wchar_t* UC_wcsncpy(wchar_t* dest, const wchar_t* src, size_t n)
 {
 	size_t i;
-	bool end;
-
-	end = false;
+	UC_bool end = UC_false;
 
 	for (i = 0; i < n; i++)
 	{
-		dest[i] = !end ? src[i] : L'\0';
-		if (!dest[i]) end = true;
+		if (!end)
+		{
+			/* we're not past the end of the source yet, so
+			   the corresponding character is copied normally.
+
+			   note that we might be exactly at the end,
+			   but in that case, the source character is a null,
+			   so it won't make a difference.                    */
+			dest[i] = src[i];
+
+			/* check if we are at the end.
+			   if so, the remaining destination characters will
+			   be filled with nulls.                            */
+			if (!dest[i]) end = UC_true;
+		}
+		else
+		{
+			/* we are past the end of the source.
+			   fill the destination with a null.  */
+			dest[i] = L'\0';
+		}
 	}
+
+	/* don't do anything else here.
+	   if n is small enough that causes the source to end prematurely
+	   (without null-termination), the destination must be left as is
+	   after the copying (i.e. not null-terminated).                  */
 
 	return dest;
 }
 
 wchar_t* UC_wcpcpy(wchar_t* dest, const wchar_t* src)
 {
+	/* almost identical to wcscpy. only the return value is different. */
+
 	size_t i;
 
 	for (i = 0; src[i]; i++) dest[i] = src[i];
+
+	/* wcscpy/wcpcpy must null-terminate the destination. */
 	dest[i] = L'\0';
 
 	return &dest[i];
@@ -129,22 +148,45 @@ wchar_t* UC_wcpcpy(wchar_t* dest, const wchar_t* src)
 
 wchar_t* UC_wcpncpy(wchar_t* dest, const wchar_t* src, size_t n)
 {
-	size_t i,
-	       endpos;
-	bool end;
+	/* almost identical to wcsncpy. only the return value is different. */
 
-	end = false;
-	endpos = n;
+	size_t i,
+	       endpos = n;
+	UC_bool end = UC_false;
 
 	for (i = 0; i < n; i++)
 	{
-		dest[i] = !end ? src[i] : L'\0';
-		if (!dest[i])
+		if (!end)
 		{
-			end = true;
-			endpos = i + 1;
+			/* we're not past the end of the source yet, so
+			   the corresponding character is copied normally.
+
+			   note that we might be exactly at the end,
+			   but in that case, the source character is a null,
+			   so it won't make a difference.                    */
+			dest[i] = src[i];
+
+			/* check if we are at the end.
+			   if so, the remaining destination characters will
+			   be filled with nulls.                            */
+			if (!dest[i])
+			{
+				end = UC_true;
+				endpos = i + 1;
+			}
+		}
+		else
+		{
+			/* we are past the end of the source.
+			   fill the destination with a null.  */
+			dest[i] = L'\0';
 		}
 	}
+
+	/* don't do anything else here.
+	   if n is small enough that causes the source to end prematurely
+	   (without null-termination), the destination must be left as is
+	   after the copying (i.e. not null-terminated).                  */
 
 	return &dest[endpos];
 }
@@ -152,9 +194,7 @@ wchar_t* UC_wcpncpy(wchar_t* dest, const wchar_t* src, size_t n)
 wchar_t* UC_wcscat(wchar_t* dest, const wchar_t* src)
 {
 	size_t i,
-	       tail;
-
-	tail = 0;
+	       tail = 0;
 
 	while (dest[tail]) tail++;
 
@@ -167,9 +207,7 @@ wchar_t* UC_wcscat(wchar_t* dest, const wchar_t* src)
 wchar_t* UC_wcsncat(wchar_t* dest, const wchar_t* src, size_t n)
 {
 	size_t i,
-	       tail;
-
-	tail = 0;
+	       tail = 0;
 
 	while (dest[tail]) tail++;
 
@@ -206,13 +244,10 @@ int UC_wcsncmp(const wchar_t* s1, const wchar_t* s2, size_t n)
 wchar_t* UC_wcschr(const wchar_t* s, wchar_t c)
 {
 	size_t i;
-	wchar_t* st;
-
-	st = (wchar_t*)s;
 
 	for (i = 0; s[i]; i++)
 	{
-		if (s[i] == c) return &st[i];
+		if (s[i] == c) return &((wchar_t*)s)[i];
 	}
 
 	return NULL;
@@ -221,37 +256,30 @@ wchar_t* UC_wcschr(const wchar_t* s, wchar_t c)
 wchar_t* UC_wcsrchr(const wchar_t* s, wchar_t c)
 {
 	size_t i,
-	       last;
-	wchar_t* st;
-	
-	st = (wchar_t*)s;
-	last = UC_INVALID_SIZE;
+	       last = UC_SIZE_PLACEHOLDER;
 
 	for (i = 0; s[i]; i++)
 	{
 		if (s[i] == c) last = i;
 	}
 
-	return (last != UC_INVALID_SIZE) ? &st[last] : NULL;
+	return (last != UC_SIZE_PLACEHOLDER) ? &((wchar_t*)s)[last] : NULL;
 }
 
 wchar_t* UC_wcsstr(const wchar_t* s, const wchar_t* kernel)
 {
-	/* could probably use some optimization */
+	/* could probably use some optimization. */
 
 	size_t i,
 	       klen;
-	wchar_t* st;
 
-	st = (wchar_t*)s;
-
-	if (!*kernel) return st;
+	if (!*kernel) return (wchar_t*)s;
 
 	klen = UC_wcslen(kernel);
 
 	for (i = 0; s[i] && s[i + klen - 1]; i++)
 	{
-		if (!UC_wcsncmp(&s[i], kernel, klen)) return &st[i];
+		if (!UC_wcsncmp(&s[i], kernel, klen)) return &((wchar_t*)s)[i];
 	}
 
 	return NULL;
@@ -284,23 +312,52 @@ size_t UC_wcscspn(const wchar_t* s, const wchar_t* reject)
 wchar_t* UC_wcspbrk(const wchar_t* s, const wchar_t* accept)
 {
 	size_t i;
-	wchar_t* st;
-
-	st = (wchar_t*)s;
 
 	for (i = 0; s[i]; i++)
 	{
-		if (UC_wcschr(accept, s[i])) return &st[i];
+		if (UC_wcschr(accept, s[i])) return &((wchar_t*)s)[i];
 	}
 
 	return NULL;
 }
 
-/*
-wchar_t* UC_wcstok(wchar_t* s, const wchar_t* delim, wchar_t** p)
+wchar_t* UC_wcstok(wchar_t* s, const wchar_t* delim, wchar_t** pnext)
 {
+	/* this code is somewhat based on glibc's strtok_r implementation. */
+
+	size_t tlen;
+
+	if (!s) s = *pnext;
+
+	/* skip leading delimiters. */
+	s = &s[UC_wcsspn(s, delim)];
+
+	/* check if the token is empty.
+	   (i.e. the end of the string has been reached. there is no token.) */
+	if (!*s)
+	{
+		*pnext = s;
+		return NULL;
+	}
+
+	/* find the end of the token. */
+	tlen = UC_wcscspn(s, delim);
+
+	/* check if the end of the token is the end of the string. */
+	if (!s[tlen])
+	{
+		*pnext = &s[tlen];
+		return s;
+	}
+
+	/* null-terminate the token. */
+	s[tlen] = L'\0';
+
+	/* mark the start of the next token. */
+	*pnext = &s[tlen + 1];
+
+	return s;
 }
-*/
 
 wchar_t* UC_wmemset(wchar_t* s, wchar_t c, size_t n)
 {
@@ -336,13 +393,10 @@ int UC_wmemcmp(const wchar_t* s1, const wchar_t* s2, size_t n)
 wchar_t* UC_wmemchr(const wchar_t* s, wchar_t c, size_t n)
 {
 	size_t i;
-	wchar_t* st;
-
-	st = (wchar_t*)s;
 
 	for (i = 0; i < n; i++)
 	{
-		if (s[i] == c) return &st[i];
+		if (s[i] == c) return &((wchar_t*)s)[i];
 	}
 
 	return NULL;
@@ -350,13 +404,10 @@ wchar_t* UC_wmemchr(const wchar_t* s, wchar_t c, size_t n)
 
 size_t UC_wcstombs(char* dest, const wchar_t* src, size_t n)
 {
-	size_t isrc,
+	size_t isrc = 0,
 	       idest,
-	       trail;
+	       trail = 0;
 	unsigned long int csrc;
-	
-	isrc = 0;
-	trail = 0;
 
 	for (idest = 0; idest < n || !dest; idest++)
 	{
@@ -453,15 +504,12 @@ size_t UC_wcstombs(char* dest, const wchar_t* src, size_t n)
 
 size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 {
-	size_t isrc,
+	size_t isrc = 0,
 	       idest,
 	       trail,
 	       clen;
-	bool lowsur;
+	UC_bool lowsur = UC_false; /* will always remain false in UTF-32. */
 	unsigned long int csrc;
-
-	isrc = 0;
-	lowsur = false; /* always false in UTF-32. */
 
 	for (idest = 0; idest < n || !dest; idest++)
 	{
@@ -571,7 +619,7 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 				((csrc - UC_SUR_OFFSET) >> 10) | UC_HIGHSUR;
 
 				/* write the low surrogate on the next turn. */
-				lowsur = true;
+				lowsur = UC_true;
 			}
 #else        /* UTF-32 */
 			if (dest) dest[idest] = csrc;
@@ -586,7 +634,7 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 			((csrc - UC_SUR_OFFSET) & UC_SURMASK) | UC_LOWSUR;
 
 			/* reset the behaviour for the next turn. */
-			lowsur = false;
+			lowsur = UC_false;
 		}
 	}
 
@@ -595,10 +643,8 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 
 static int UC_wctomb_internal(char* s, unsigned long int c)
 {
-	size_t i,
+	size_t i = 0,
 	       trail;
-
-	i = 0;
 
 	if (c <= UC_MAX_1BYTE)
 	{
@@ -727,11 +773,11 @@ int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
 		return 0;
 	}
 
-	trail = UC_INVALID_SIZE;
+	trail = UC_SIZE_PLACEHOLDER;
 
 	for (i = 0; i < n || !trail; i++)
 	{
-		if (trail == UC_INVALID_SIZE)
+		if (trail == UC_SIZE_PLACEHOLDER)
 		{
 			/* read the first byte of the character. */
 
@@ -862,15 +908,13 @@ UC_wint_t UC_btowc(int c)
 int UC_mblen(const char* s, size_t n)
 {
 	size_t i,
-	       trail,
+	       trail = UC_SIZE_PLACEHOLDER,
 	       clen;
 	unsigned long int c;
 
-	trail = UC_INVALID_SIZE;
-
 	for (i = 0; i < n || !trail; i++)
 	{
-		if (trail == UC_INVALID_SIZE)
+		if (trail == UC_SIZE_PLACEHOLDER)
 		{
 			/* read the first byte of the character. */
 

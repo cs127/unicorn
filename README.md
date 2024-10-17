@@ -27,9 +27,6 @@ if your compiling environment does not support C99 or newer, then unless your co
 
 ## what's not implemented
 
-* the following will be implemented in a later update:
-  * `wcstok` function.
-
 * the following do not need to be implemented, because UTF-8 is stateless:
   * `mbstate_t` type.
   * `mbsinit` function.
@@ -56,4 +53,4 @@ if your compiling environment does not support C99 or newer, then unless your co
 * `WEOF` macro (evaluates to `-1`).
 * `MB_LEN_MAX` and `MB_CUR_MAX` macros (both evaluate to `4`, because the multibyte encoding is always UTF-8).
 * wide character related `stdlib.h` functions (e.g. `wcstombs`, `mbstowcs`, `mblen`).
-* nonstandard `mbstowc` function, which is an alternative to `mbtowc`, but expects a `wchar_t*` instead of `wchar`, to be able to read surrogate pairs in UTF-16.
+* nonstandard `mbstowc` function, which is an alternative to `mbtowc`, but expects a `wchar_t*` instead of `wchar_t`, to be able to read surrogate pairs in UTF-16.

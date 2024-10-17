@@ -1,7 +1,7 @@
 /*
  * unicorn
- * version 0.001
- * 2024-06-09
+ * version 0.002
+ * 2024-06-11
  */
 
 
@@ -71,9 +71,7 @@ size_t UC_wcscspn(const wchar_t* s, const wchar_t* reject);
 
 wchar_t* UC_wcspbrk(const wchar_t* s, const wchar_t* accept);
 
-/*
-wchar_t* UC_wcstok(wchar_t* s, const wchar_t* delim, wchar_t** p);
-*/
+wchar_t* UC_wcstok(wchar_t* s, const wchar_t* delim, wchar_t** pnext);
 
 wchar_t* UC_wmemset(wchar_t* s, wchar_t c, size_t n);
 
