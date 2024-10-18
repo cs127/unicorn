@@ -1,6 +1,11 @@
 # unicorn
 
-unicorn is a lightweight implementation of most of the standard C wide character functions, for platforms that don't support them, but still have a wide character type in the form of `wchar_t`, **as long as it is at least 16 bits (if unsigned) or 17 bits (if signed)**.
+unicorn is a lightweight implementation of most of the standard C wide character functions, for platforms that don't support them, but still have a wide character type in the form of `wchar_t` (mainly DJGPP).
+
+functions for converting extended ASCII codepages to unicode are also provided as an addon (see *ascx* at the end of the document).
+
+> [!IMPORTANT]
+> to be able to use unicorn, the `wchar_t` type in your compiling environment must be **at least 16 bits (if unsigned) or 17 bits (if signed)**.
 
 > [!NOTE]
 > this is just a hobby project.
@@ -23,7 +28,7 @@ the only exception being the `wchar_t` type. unicorn uses the standard `wchar_t`
 ## compatibility
 
 unicorn is *almost* C89-compatible, except that it needs to know the maximum possible value of the `wchar_t` type.
-if your compiling environment does not support C99 or newer, then unless your compiler itself predefines `WCHAR_MAX`, `__WCHAR_MAX`, or `__WCHAR_MAX__`, you need to manually define one of them during compile time (make sure to give it the correct value!).
+if your compiling environment does not support C99 or newer, then unless your compiler itself predefines `WCHAR_MAX`, `__WCHAR_MAX`, or `__WCHAR_MAX__`, you need to manually define one of them during compile time (make sure to give it the correct value! and remember, if the type is not large enough, none of this will work!).
 
 ## what's not implemented
 
@@ -54,3 +59,26 @@ if your compiling environment does not support C99 or newer, then unless your co
 * `MB_LEN_MAX` and `MB_CUR_MAX` macros (both evaluate to `4`, because the multibyte encoding is always UTF-8).
 * wide character related `stdlib.h` functions (e.g. `wcstombs`, `mbstowcs`, `mblen`).
 * nonstandard `mbstowc` function, which is an alternative to `mbtowc`, but expects a `wchar_t*` instead of `wchar_t`, to be able to read surrogate pairs in UTF-16.
+
+### ascx
+
+unicorn includes an addon called ascx, which you can find in the `ascx` subdirectory of the sources. it includes functions for converting strings from various extended ASCII codepages to Unicode.
+
+the functions are:
+* `ascxtowc`: for converting a single character.
+* `ascxstowcs`: for converting an entire string.
+
+the behaviour of the two functions are identical to `mbtowc` and `mbstowcs` respectively, except that they take an extra parameter to specify which codepage the extended ASCII string is encoded in.
+
+the currently supported codepages are:
+* IBM437
+* IBM850
+* IBM858
+* Windows-1252
+* ISO-8859-1 with C0 and C1 control characters
+
+the IBM codepages each have two variants:
+* `C0`: containing C0 control characters.
+* `C0_REP`: containing IBM dingbats in place of C0 control characters.
+
+unassigned codepoints (e.g. `$81` in Windows-1252) are converted to the replacement character (`U+FFFD`).

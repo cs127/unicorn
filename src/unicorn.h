@@ -1,7 +1,7 @@
 /*
  * unicorn
- * version 0.002
- * 2024-06-11
+ * version 0.003
+ * 2024-10-17
  */
 
 
@@ -36,12 +36,18 @@
 #endif
 
 
+#ifndef UC_WINT_IMPL
+#define UC_WINT_IMPL
+
 typedef signed long int UC_wint_t;
 
 #define UC_WINT_MAX LONG_MAX
 #define UC_WINT_MIN LONG_MIN
 
 #define UC_WEOF (-1)
+
+#endif /* UC_WINT_IMPL */
+
 
 #define UC_MB_LEN_MAX 4
 #define UC_MB_CUR_MAX UC_MB_LEN_MAX

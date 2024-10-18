@@ -1,10 +1,8 @@
 /*
  * unicorn
- * version 0.002
- * 2024-06-11
+ * version 0.003
+ * 2024-10-17
  */
-
-/* I wish I could use BCPL-style comments. damn you C89.. */
 
 
 #include "unicorn.h"
