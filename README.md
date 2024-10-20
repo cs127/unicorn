@@ -58,7 +58,7 @@ if your compiling environment does not support C99 or newer, then unless your co
 * `WEOF` macro (evaluates to `-1`).
 * `MB_LEN_MAX` and `MB_CUR_MAX` macros (both evaluate to `4`, because the multibyte encoding is always UTF-8).
 * wide character related `stdlib.h` functions (e.g. `wcstombs`, `mbstowcs`, `mblen`).
-* nonstandard `mbstowc` function, which is an alternative to `mbtowc`, but expects a `wchar_t*` instead of `wchar_t`, to be able to read surrogate pairs in UTF-16.
+* nonstandard `wcstomb` function, which is an alternative to `wctomb`, but expects a `wchar_t*` instead of `wchar_t`, to be able to read surrogate pairs in UTF-16.
 
 ### ascx
 
