@@ -91,16 +91,17 @@ wchar_t* UC_wmemchr(const wchar_t* s, wchar_t c, size_t n);
 size_t UC_wcstombs(char* dest, const wchar_t* src, size_t n);
 size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n);
 
-int UC_wctomb(char* s, wchar_t c);
-int UC_wcstomb(char* s, const wchar_t* pc);
-int UC_mbtowc(wchar_t* pc, const char* s, size_t n);
+int UC_wctomb(char* mb, wchar_t c);
+int UC_wcstomb(char* mb, const wchar_t* pc);
+int UC_mbtowc(wchar_t* pc, const char* mb, size_t n);
+int UC_mbtowcs(wchar_t* pc, const char* mb, size_t n);
 
 /* in UTF-8, these two functions are completely useless and extremely trivial.
    but whatever, I've still implemented them anyway.                          */
 int UC_wctob(UC_wint_t c);
-UC_wint_t UC_btowc(int c);
+UC_wint_t UC_btowc(int a);
 
-int UC_mblen(const char* s, size_t n);
+int UC_mblen(const char* mb, size_t n);
 
 
 #endif /* UC_H_UNICORN */

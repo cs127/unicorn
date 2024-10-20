@@ -639,7 +639,7 @@ size_t UC_mbstowcs(wchar_t* dest, const char* src, size_t n)
 	return idest;
 }
 
-static int UC_wctomb_internal(char* s, unsigned long int c)
+static int UC_wctomb_(char* mb, unsigned long int c)
 {
 	size_t i = 0,
 	       trail;
@@ -648,19 +648,19 @@ static int UC_wctomb_internal(char* s, unsigned long int c)
 	{
 		/* 1-byte (ASCII) character. */
 		trail = 0;
-		s[i++] = c;
+		mb[i++] = c;
 	}
 	else if (c <= UC_MAX_2BYTE)
 	{
 		/* first byte of a 2-byte character. */
 		trail = 1;
-		s[i++] = (c >> 6) | UC_TOP2;
+		mb[i++] = (c >> 6) | UC_TOP2;
 	}
 	else if (c <= UC_MAX_3BYTE)
 	{
 		/* first byte of a 3-byte character. */
 		trail = 2;
-		s[i++] = (c >> 12) | UC_TOP3;
+		mb[i++] = (c >> 12) | UC_TOP3;
 	}
 	else
 	{
@@ -669,20 +669,20 @@ static int UC_wctomb_internal(char* s, unsigned long int c)
 		   since a non-BMP character cannot be represented
 		   by a single wchar_t in UTF-16.                   */
 		trail = 3;
-		s[i++] = (c >> 18) | UC_TOP4;
+		mb[i++] = (c >> 18) | UC_TOP4;
 	}
 
 	while (trail)
 	{
-		s[i++] = ((c >> (6 * (--trail))) & UC_BOTTOM6) | UC_TOP1;
+		mb[i++] = ((c >> (6 * (--trail))) & UC_BOTTOM6) | UC_TOP1;
 	}
 
 	return i;
 }
 
-int UC_wctomb(char* s, wchar_t c)
+int UC_wctomb(char* mb, wchar_t c)
 {
-	if (!s)
+	if (!mb)
 	{
 		/* shift state reset has been requested.
 		   no further action is needed other than returning 0,
@@ -702,14 +702,14 @@ int UC_wctomb(char* s, wchar_t c)
 		return -1;
 	}
 
-	return UC_wctomb_internal(s, c);
+	return UC_wctomb_(mb, c);
 }
 
-int UC_wcstomb(char* s, const wchar_t* pc)
+int UC_wcstomb(char* mb, const wchar_t* pc)
 {
 	unsigned long int c;
 
-	if (!s)
+	if (!mb)
 	{
 		/* shift state reset has been requested.
 		   no further action is needed other than returning 0,
@@ -753,17 +753,17 @@ int UC_wcstomb(char* s, const wchar_t* pc)
 	}
 #endif
 
-	return UC_wctomb_internal(s, c);
+	return UC_wctomb_(mb, c);
 }
 
-int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
+static int UC_mbtowcx_(wchar_t* pc, const char* mb, size_t n, UC_bool towcs)
 {
 	size_t i,
 	       trail,
 	       clen;
 	unsigned long int c;
 
-	if (!s)
+	if (!mb)
 	{
 		/* shift state reset has been requested.
 		   no further action is needed other than returning 0,
@@ -779,40 +779,46 @@ int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
 		{
 			/* read the first byte of the character. */
 
-			if (!s[i])
+			if (!mb[i])
 			{
 				/* null character. */
 				return 0;
 			}
-			else if (UC_IS_1BYTE(s[i]))
+			else if (UC_IS_1BYTE(mb[i]))
 			{
 				/* 1-byte (ASCII) character. */
 				trail = 0;
-				c = s[i];
+				c = mb[i];
 			}
-			else if (UC_IS_2BYTE(s[i]))
+			else if (UC_IS_2BYTE(mb[i]))
 			{
 				/* first byte of a 2-byte character. */
 				trail = 1;
-				c = (s[i] & UC_BOTTOM5) << 6;
+				c = (mb[i] & UC_BOTTOM5) << 6;
 			}
-			else if (UC_IS_3BYTE(s[i]))
+			else if (UC_IS_3BYTE(mb[i]))
 			{
 				/* first byte of a 3-byte character.
 				   this might be a UTF-16 surrogate,
 				   which is invalid in UTF-8.        */
 				trail = 2;
-				c = (s[i] & UC_BOTTOM4) << 12;
+				c = (mb[i] & UC_BOTTOM4) << 12;
 			}
-			else if (UC_IS_4BYTE(s[i]))
+			else if (UC_IS_4BYTE(mb[i]))
 			{
 				/* first byte of a 4-byte (non-BMP) character.
 				   this will require checking later:
 				   if the codepoint is 0x10FFFF or lower,
 				   it requires a surrogate pair in UTF-16.
 				   otherwise, it is invalid entirely.         */
+#if UC_UTF16 /* UTF-16 */
+				/* reject if called from mbtowc, since the
+				   destination requires two characters for a
+				   surrogate pair.                            */
+				if (!towcs) return -1;
+#endif
 				trail = 3;
-				c = (s[i] & UC_BOTTOM3) << 18;
+				c = (mb[i] & UC_BOTTOM3) << 18;
 			}
 			else
 			{
@@ -879,18 +885,28 @@ int UC_mbtowc(wchar_t* pc, const char* s, size_t n)
 		{
 			/* parsing the continuation of a character. */
 
-			if (!UC_IS_CONT(s[i]))
+			if (!UC_IS_CONT(mb[i]))
 			{
 				/* unexpected byte
 				   (expected a continuation byte). */
 				return -1;
 			}
 
-			c |= (s[i] & UC_BOTTOM6) << (6 * (--trail));
+			c |= (mb[i] & UC_BOTTOM6) << (6 * (--trail));
 		}
 	}
 
 	return !trail ? i : -1;
+}
+
+int UC_mbtowc(wchar_t* pc, const char* mb, size_t n)
+{
+	return UC_mbtowcx_(pc, mb, n, UC_false);
+}
+
+int UC_mbtowcs(wchar_t* pc, const char* mb, size_t n)
+{
+	return UC_mbtowcx_(pc, mb, n, UC_true);
 }
 
 int UC_wctob(UC_wint_t c)
@@ -898,12 +914,12 @@ int UC_wctob(UC_wint_t c)
 	return c >= 0x00 & c <= 0x7F ? c : EOF;
 }
 
-UC_wint_t UC_btowc(int c)
+UC_wint_t UC_btowc(int a)
 {
-	return c >= 0x00 & c <= 0x7F ? c : UC_WEOF;
+	return a >= 0x00 & a <= 0x7F ? a : UC_WEOF;
 }
 
-int UC_mblen(const char* s, size_t n)
+int UC_mblen(const char* mb, size_t n)
 {
 	size_t i,
 	       trail = UC_SIZE_PLACEHOLDER,
@@ -916,32 +932,32 @@ int UC_mblen(const char* s, size_t n)
 		{
 			/* read the first byte of the character. */
 
-			if (!s[i])
+			if (!mb[i])
 			{
 				/* null character. */
 				return 0;
 			}
-			else if (UC_IS_1BYTE(s[i]))
+			else if (UC_IS_1BYTE(mb[i]))
 			{
 				/* 1-byte (ASCII) character. */
 				trail = 0;
-				c = s[i];
+				c = mb[i];
 			}
-			else if (UC_IS_2BYTE(s[i]))
+			else if (UC_IS_2BYTE(mb[i]))
 			{
 				/* first byte of a 2-byte character. */
 				trail = 1;
-				c = (s[i] & UC_BOTTOM5) << 6;
+				c = (mb[i] & UC_BOTTOM5) << 6;
 			}
-			else if (UC_IS_3BYTE(s[i]))
+			else if (UC_IS_3BYTE(mb[i]))
 			{
 				/* first byte of a 3-byte character.
 				   this might be a UTF-16 surrogate,
 				   which is invalid in UTF-8.        */
 				trail = 2;
-				c = (s[i] & UC_BOTTOM4) << 12;
+				c = (mb[i] & UC_BOTTOM4) << 12;
 			}
-			else if (UC_IS_4BYTE(s[i]))
+			else if (UC_IS_4BYTE(mb[i]))
 			{
 				/* first byte of a 4-byte (non-BMP) character.
 				   this will require checking later:
@@ -949,7 +965,7 @@ int UC_mblen(const char* s, size_t n)
 				   it requires a surrogate pair in UTF-16.
 				   otherwise, it is invalid entirely.         */
 				trail = 3;
-				c = (s[i] & UC_BOTTOM3) << 18;
+				c = (mb[i] & UC_BOTTOM3) << 18;
 			}
 			else
 			{
@@ -992,14 +1008,14 @@ int UC_mblen(const char* s, size_t n)
 		{
 			/* parsing the continuation of a character. */
 
-			if (!UC_IS_CONT(s[i]))
+			if (!UC_IS_CONT(mb[i]))
 			{
 				/* unexpected byte
 				   (expected a continuation byte). */
 				return -1;
 			}
 
-			c |= (s[i] & UC_BOTTOM6) << (6 * (--trail));
+			c |= (mb[i] & UC_BOTTOM6) << (6 * (--trail));
 		}
 	}
 
