@@ -16,7 +16,7 @@ unlike the standard functions which are locale-dependent, unicorn does not suppo
 
 * wide characters (`wchar_t`) are assumed to be encoded in UTF-32 if `WCHAR_MAX` is at least `0x10FFFF` (e.g. Linux), or UTF-16 otherwise (e.g. Windows).
   * surrogates (`U+D800`-`U+DFFF`) are considered invalid in UTF-32.
-  * a new function (`mbstowc`) has been implemented as an alternative to `mbtowc` to allow converting individual non-BMP characters in UTF-16.
+  * two new functions (`wcstomb` and `mbtowcs`) have been implemented as alternatives to `wctomb` and `mbtowc` respectively, to allow converting individual non-BMP characters in UTF-16.
 * multibyte strings (used in `mbstowcs` and the like) are assumed to be encoded in UTF-8.
   * surrogates (`U+D800`-`U+DFFF`) are considered invalid in multibyte strings.
   * characters of length 5-8 are considered invalid, and so are 4-byte characters that exceed `U+10FFFF`.
